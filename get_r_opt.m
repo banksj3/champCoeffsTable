@@ -18,47 +18,54 @@ function [rL,rR,kappa,A,info] = get_r_opt( theta,beta,lambda,method,file )
 %%   'linear'  : trilinear interpolation in log10(theta), log10(beta), log10(lambda)
 %%               per family, of r in the measure log(r+0.01) and of the tracked and
 %%               verified max|A|. A family takes part only if it is stable at all
-%%               surrounding table nodes that carry weight (at a table node: that node). Among those, the family chosen at the
-%%               nearest node is used if it takes part, otherwise the selection rule
-%%               below. The interpolated r has not itself been verified; where no
+%%               surrounding table nodes that carry weight (at a table node: that
+%%               node). Among those, the family chosen at the nearest node is used if
+%%               it takes part, otherwise the selection rule below. The interpolated r has not itself been verified; where no
 %%               family takes part (e.g. next to the stability limit) the nearest-node
 %%               value is returned instead (info.method = 'nearest' there).
 %%   'nearest' : the nearest table node, with the family chosen there. Every value
 %%               returned has been verified at that node.
+%% Outside the table range (theta, beta in [1e-6,1e6], lambda in [1,1e8]) the
+%% values of the nearest table node (on the boundary of the table) are returned,
+%% with info.method = 'nearestExtrap' and a warning; they are not verified at the
+%% query point.
 %% Selection rule: smallest tracked minimax value A* unless several lie within
 %% max(1.05 A*, A*+0.02) (or 0.1 times the verified max|A| when A* has collapsed);
 %% among those the smallest verified max|A|, with ties resolved toward the family
 %% chosen at neighbouring nodes.
 %%
 %% Outputs:
-%%   rL, rR : coefficients; NaN where no family is stable or the query is outside
-%%            the table (theta, beta in [1e-6,1e6], lambda in [1,1e8])
+%%   rL, rR : coefficients; NaN where no family is stable at the (nearest) table
+%%            node, or for invalid input (not positive and finite)
 %%   kappa  : [size(theta) x 4] wavenumbers of the (up to 4) tracked peaks of
 %%            |A(kappa)| of the chosen family, largest |A| first (NaN = no peak),
 %%            from the table node nearest the query (an estimate for 'linear')
 %%   A      : [size(theta) x 4] complex amplification factors of those peaks
 %%   info   : Amax   verified max|A| over all roots and kappa (interpolated for 'linear')
 %%            Astar  tracked minimax value A*
-%%            family index of the chosen family (0 none stable, NaN outside)
+%%            family index of the chosen family (0 none stable, NaN invalid input)
 %%            families  family names
 %%            active [size x 4] peak is in the minimax active set
-%%            method per query, 'linear' or 'nearest'
+%%            method per query: 'linear', 'nearest', 'nearestExtrap' (outside the
+%%                   table range), 'none' (no stable family) or 'invalid'
 
   persistent T
   if( nargin < 4 || isempty(method) ), method = 'linear'; end
   if( nargin < 5 || isempty(file) ), file = fullfile( fileparts(mfilename('fullpath')),'champ_order2.h5' ); end
   if( isempty(T) || ~strcmp(T.file,file) ), T = loadTable( file ); end
   sz = size(theta); n = numel(theta);
-  q = [log10(theta(:)) log10(beta(:)) log10(lambda(:))].';
+  X = [theta(:) beta(:) lambda(:)].';
+  valid = all( isfinite(X) & X > 0,1 );
+  X(:,~valid) = 1; q = log10( X );
   g = {T.lt,T.lb,T.ll}; nF = numel(T.names);
-  inR = true(1,n);
-  for d = 1:3, inR = inR & isfinite(q(d,:)) & q(d,:) >= g{d}(1)-1e-12 & q(d,:) <= g{d}(end)+1e-12; end
+  inR = valid;
+  for d = 1:3, inR = inR & q(d,:) >= g{d}(1)-1e-12 & q(d,:) <= g{d}(end)+1e-12; end
 
   % nearest node (always needed: family choice, peaks, fallback)
   idx = ones(3,n);
   for d = 1:3, idx(d,:) = min( max( round((q(d,:)-g{d}(1))/(g{d}(2)-g{d}(1)))+1,1 ),numel(g{d}) ); end
   nn = sub2ind( T.sz,idx(1,:),idx(2,:),idx(3,:) );
-  bestN = T.best(nn); bestN(~inR) = 0;
+  bestN = T.best(nn); bestN(~valid) = 0;
 
   useLin = strcmpi(method,'linear');
   if( ~useLin && ~strcmpi(method,'nearest') ), error( 'get_r_opt: unknown method %s',method ); end
@@ -97,6 +104,9 @@ function [rL,rR,kappa,A,info] = get_r_opt( theta,beta,lambda,method,file )
     B = T.F(bestN(i)); rLq(i) = B.rL(nn(i)); rRq(i) = B.rR(nn(i)); Am(i) = B.Amax(nn(i)); As(i) = B.Atracked(nn(i)); fam(i) = bestN(i);
   end
   fam(isnan(rLq)) = 0;
+  how( valid & ~inR ) = {'nearestExtrap'};
+  how( valid & fam == 0 ) = {'none'};
+  how( ~valid ) = {'invalid'};
 
   % peaks of the chosen family at the nearest node
   K = nan(n,4); Ap = complex(K,K); act = false(n,4);
@@ -105,8 +115,9 @@ function [rL,rR,kappa,A,info] = get_r_opt( theta,beta,lambda,method,file )
     K(i,:) = B.peakKappa(:,nn(i)).'; Ap(i,:) = complex( B.peakAreal(:,nn(i)),B.peakAimag(:,nn(i)) ).'; act(i,:) = B.peakActive(:,nn(i)).' > 0;
   end
 
-  fam = double(fam); fam(~inR) = NaN;
-  if( any(~inR) ), warning( 'get_r_opt:range','%d of %d queries outside the table range: NaN returned',sum(~inR),n ); end
+  fam = double(fam); fam(~valid) = NaN;
+  if( any(valid & ~inR) ), warning( 'get_r_opt:range','%d of %d queries outside the table range: values of the nearest table node returned',sum(valid & ~inR),n ); end
+  if( any(~valid) ), warning( 'get_r_opt:invalid','%d of %d queries with non-positive or non-finite parameters: NaN returned',sum(~valid),n ); end
   rL = reshape( rLq,sz ); rR = reshape( rRq,sz );
   kappa = reshape( K,[sz 4] ); A = reshape( Ap,[sz 4] );
   if( isvector(theta) || isscalar(theta) ), kappa = reshape( K,[n 4] ); A = reshape( Ap,[n 4] ); end

@@ -25,8 +25,11 @@ second-order (BDF2) scheme.
     value; `info.family`, `info.families`: which family of optima was chosen;
     `info.active`: peaks in the minimax active set; `info.method`: per query
 
-`NaN` is returned where no stable coefficients exist in the table (max|A| > 1 for every
-family) or outside the range `theta, beta` in `[1e-6, 1e6]`, `lambda` in `[1, 1e8]`.
+The table covers `theta, beta` in `[1e-6, 1e6]`, `lambda` in `[1, 1e8]`. Outside that
+range the values of the nearest table node (on the boundary of the table) are returned,
+with `info.method = 'nearestExtrap'` and a warning. `NaN` is returned where no stable
+coefficients exist at the table node (max|A| > 1 for every family; `info.method = 'none'`)
+and for non-positive or non-finite input.
 
 ## How the lookup works
 
