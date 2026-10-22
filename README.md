@@ -31,6 +31,27 @@ with `info.method = 'nearestExtrap'` and a warning. `NaN` is returned where no s
 coefficients exist at the table node (max|A| > 1 for every family; `info.method = 'none'`)
 and for non-positive or non-finite input.
 
+## Usage (C)
+
+`c/champ_table.h`, `c/champ_table.c`: the same lookup in C (needs the HDF5 C library, 1.8 or
+later). Build the example with `cd c; make HDF5=<hdf5 prefix>` (e.g. `/opt/homebrew/opt/hdf5`).
+
+```c
+#include "champ_table.h"
+
+champ_table *T = champ_table_open( "champ_order2.h5" );
+champ_result r;
+double pL, pR;
+champ_get_r_opt( T,theta,beta,lambda,CHAMP_LINEAR,&r );        /* r.rL, r.rR */
+champ_get_p_opt( T,theta,beta,lambda,CHAMP_LINEAR,&pL,&pR,&r ); /* Robin weights */
+/* r.kappa[], r.A_re[], r.A_im[], r.active[]: tracked peaks; r.Amax, r.Astar,
+   r.familyName, champ_method_name(r.method) */
+champ_table_close( T );
+```
+
+`c/champ_example theta beta lambda [linear|nearest]` prints the result for one query. The C
+and MATLAB routines give the same values (to rounding).
+
 ## How the lookup works
 
 The table holds several families of locally optimal (minimax) coefficients. Each family is
